@@ -1,46 +1,65 @@
 package com.angular.spring.backend.apirest.springbootbackendapirest.controllers;
 
 
+import com.angular.spring.backend.apirest.springbootbackendapirest.error.ClienteNotFoundException;
 import com.angular.spring.backend.apirest.springbootbackendapirest.models.entity.Cliente;
 import com.angular.spring.backend.apirest.springbootbackendapirest.models.services.IClienteService;
-import org.springframework.beans.factory.annotation.Autowired;
+import jakarta.validation.Valid;
 import org.springframework.dao.DataAccessException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.BindingResult;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
-@CrossOrigin(origins = "http://localhost:4200")
+@CrossOrigin(origins = {"http://localhost:4200"})
 @RestController
-@RequestMapping("/clientes")
+@RequestMapping("/api")
 public class ClienteRestController {
 
-    @Autowired
+
     private IClienteService clienteService;
 
+    public ClienteRestController(IClienteService clienteService) {
+        this.clienteService = clienteService;
+    }
+
     //Metodo que trae todos los clientes
-    @GetMapping("/listar")
+    @GetMapping("/clientes")
     public List<Cliente> index() {
         return clienteService.findAllClients();
     }
 
+    //Metodo que trae todos los clientes paginados
+    @GetMapping("/clientes/page/{page}")
+    public Page<Cliente> indexPage(@PathVariable Integer page) {
+        Pageable pageable = PageRequest.of(page, 4);
+        return clienteService.findAllClientsPage(pageable);
+    }
+
     //Metodo para mostrar un cliente por id
-    @GetMapping("/listar/{id}")
-    public ResponseEntity<?> showById(@PathVariable Long id) {
+    @GetMapping("/clientes/{id}")
+    public ResponseEntity<?> showById(@PathVariable Long id) throws ClienteNotFoundException {
         Optional<Cliente> cliente = clienteService.findClientById(id);
         if (cliente.isPresent()) {
             return ResponseEntity.ok(cliente.orElseThrow());
         }
-        return getApiErrorResponseResponseEntity(id);
+        throw new ClienteNotFoundException("Cliente :" +" " + " " + id + "no encontrado");
     }
 
     //Metodo para crear un cliente
-    @PostMapping("/crear")
-    public ResponseEntity<?> create(@RequestBody Cliente cliente) {
+    @PostMapping("/clientes")
+    public ResponseEntity<?> create(@RequestBody @Valid Cliente cliente, BindingResult binding) {
         Cliente clienteNew = null;
         Map<String, Object> response = new HashMap<>();
+        if (binding.hasErrors()) {
+            return validation(binding);
+        }
         try {
             clienteNew = clienteService.saveClient(cliente);
         } catch (DataAccessException e) {
@@ -53,9 +72,17 @@ public class ClienteRestController {
         return new ResponseEntity<Map<String, Object>>(response, HttpStatus.CREATED);
     }
 
+    private ResponseEntity<?> validation(BindingResult binding) {
+        Map<String, Object> response = new HashMap<>();
+        List<String> errors = binding.getFieldErrors().stream().map(err ->
+                "El campo '" + err.getField() + "' " + err.getDefaultMessage()).collect(Collectors.toList());
+        response.put("errors", errors);
+        return new ResponseEntity<Map<String, Object>>(response, HttpStatus.BAD_REQUEST);
+    }
+
     //Metodo para EDITAR un cliente por id
-    @PutMapping("/update/{id}")
-    public ResponseEntity<?> update(@RequestBody Cliente cliente, @PathVariable Long id) {
+    @PutMapping("/clientes/{id}")
+    public ResponseEntity<?> update(@RequestBody Cliente cliente, @PathVariable Long id) throws ClienteNotFoundException {
         Optional<Cliente> clienteOp = clienteService.findClientById(id);
         if (clienteOp.isPresent()) {
             //Relaciono el cliente que viene por parametro con el cliente que se encuentra en la base de datos.
@@ -65,18 +92,23 @@ public class ClienteRestController {
             clienteActual.setEmail(cliente.getEmail());
             return ResponseEntity.status(HttpStatus.CREATED).body(clienteService.saveClient(clienteActual));
         }
-        return getApiErrorResponseResponseEntity(id);
+        throw new ClienteNotFoundException("Cliente :" + "" + id + " " + "no encontrado");
     }
 
     //Metodo para ELIMINAR un cliente por id
     @DeleteMapping("/{id}")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void delete(@PathVariable Long id) {
-        clienteService.deleteClient(id);
+    public ResponseEntity<?> delete(@PathVariable Long id) throws ClienteNotFoundException {
+        Map<String, Object> response = new HashMap<>();
+        Optional<Cliente> clienteOp = clienteService.findClientById(id);
+        if (clienteOp.isPresent()) {
+            clienteService.deleteClient(id);
+            response.put("mensaje", "Cliente eliminado con exito");
+            response.put("cliente", clienteOp.orElseThrow());
+            return new ResponseEntity<Map<String, Object>>(response, HttpStatus.CREATED);
+        }
+        throw new ClienteNotFoundException("Cliente :" + " " + id + " " + "no encontrado");
     }
+
     //Metodo para retornar un mensaje de error cuando no se encuentra un cliente por id.
-    private static ResponseEntity<ApiErrorResponse> getApiErrorResponseResponseEntity(Long id) {
-        ApiErrorResponse error = new ApiErrorResponse(404, "Cliente" + " " + id + " " + "no encontrado,NOT_FOUND");
-        return ResponseEntity.status(HttpStatus.NOT_FOUND).contentType(MediaType.APPLICATION_JSON).body(error);
-    }
+
 }
